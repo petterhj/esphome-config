@@ -1,0 +1,206 @@
+esphome:
+  name: controller
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+ota:
+  password: !secret controller_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Controller Fallback Hotspot"
+    password: !secret controller_fallback_ap_password
+
+captive_portal:
+
+packages:
+  gray: !include colors/color/COLOR_CSS_LIGHTGRAY
+  yellow: !include colors/color/COLOR_CSS_YELLOW
+
+font:
+  - file: "fonts/robotobold.ttf"
+    id: futur
+    size: 14
+    glyphs: |
+      !"%()+=,-_.:°/0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÆØÅÖÄËÉÒ abcdefghijklmnopqrstuvwxyzæøåöäëéòđ
+  - file: "fonts/robotobold.ttf"
+    id: font_med
+    size: 20
+    glyphs: |
+      :0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÆØÅÖÄËÉÒ abcdefghijklmnopqrstuvwxyzæøåöäëéò
+  - file: "fonts/robotobold.ttf"
+    id: font_big
+    size: 30
+    glyphs: |
+      :0123456789
+  - file: "fonts/material.ttf"
+    id: material
+    size: 40
+    glyphs:
+      - "\U000F0599" # mdi-weather-sunny
+      - "\U000F0594" # mdi-weather-night
+      - "\U000F0590" # mdi:weather-cloudy
+      - "\U000F0596" # mdi:weather-pouring
+      - "\U000F0598" # mdi-weather-snowy
+      - "\U000F067F" # mdi:weather-snowy-rainy
+      - "\U000F0F36" # mdi:weather-snowy-heavy
+      - "\U000F059E" # mdi:weather-windy-variant
+      - "\U000F0591" # mdi:weather-fog
+      - "\U000F0F33" # mdi-weather-rainy
+      - "\U000F0595" # mdi:weather-partly-cloudy
+      - "\U000F0F31" # mdi:weather-night-partly-cloudy
+      - "\U000F067E" # mdi-weather-lightning-rainy
+    
+image:
+  - file: "images/nrk1.jpg"
+    id: nrk1_logo
+    type: RGB24
+  - file: "images/nrkp2.jpg"
+    id: nrkp2_logo
+    type: RGB24
+    
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    timezone: Europe/Oslo
+
+spi: 
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+  miso_pin: GPIO12
+  
+sensor:
+  # Weather
+  - platform: homeassistant
+    id: weather_temp
+    entity_id: weather.oslo
+    attribute: temperature
+  - platform: homeassistant
+    id: weather_wind
+    entity_id: weather.oslo
+    attribute: wind_speed
+  # Distance sensor
+  - platform: ultrasonic
+    id: distance_sensor
+    trigger_pin: GPIO18
+    echo_pin: GPIO19
+    name: "Ultrasonic Sensor"
+    update_interval: 1s
+    internal: true
+    on_value_range:
+      - above: 0.5
+        then:
+          - light.turn_off: back_light
+      - below: 0.5
+        then:
+          - light.turn_on:
+              id: back_light
+              brightness: 50%
+
+text_sensor:
+  # Weather
+  - platform: homeassistant
+    id: weather_condition
+    entity_id: weather.oslo
+  - platform: homeassistant
+    id: weather_text
+    entity_id: weather.oslo
+    filters:
+      - map:
+        - "clear-night -> Klart"
+        - "cloudy -> Sunny"
+        - "fog -> Tåke"
+        - "lightning-rainy -> Sunny"
+        - "partlycloudy -> Delvis skyet"
+        - "pouring -> Regn"
+        - "rainy -> Regn"
+        - "snowy -> Snø"
+        - "snowy-rainy -> Sludd"
+        - "sunny -> Sol"
+  # EPG
+  - platform: homeassistant
+    id: nrk1_current
+    entity_id: sensor.nrk1
+  - platform: homeassistant
+    id: nrk1_next
+    entity_id: sensor.nrk1
+    attribute: next_title
+  - platform: homeassistant
+    id: nrkp2_current
+    entity_id: sensor.nrk_p2
+  - platform: homeassistant
+    id: nrkp2_next
+    entity_id: sensor.nrk_p2
+    attribute: next_title
+  
+# Define a PWM output on the ESP32
+output:
+  - platform: ledc
+    pin: GPIO32
+    id: gpio_32_backlight_pwm
+
+# Define a monochromatic, dimmable light for the backlight
+light:
+  - platform: monochromatic
+    output: gpio_32_backlight_pwm
+    name: "Controller Display Backlight"
+    id: back_light
+    restore_mode: RESTORE_DEFAULT_ON
+
+display:
+  - platform: ili9341
+    model: TFT_2.4
+    cs_pin: GPIO27
+    dc_pin: GPIO25
+    led_pin: GPIO32
+    reset_pin: GPIO33
+    rotation: 270
+
+    lambda: |-
+      it.fill(Color::BLACK);
+      
+      // Weather and time
+      std::map<std::string, std::string> weather_state {
+          { "clear-night", "\U000F0594" },
+          { "cloudy", "\U000F0590" },
+          { "fog", "\U000F0591" },
+          { "lightning-rainy", "\U000F067E" }, 
+          { "partlycloudy", "\U000F0595" },
+          { "pouring", "\U000F0596" },
+          { "rainy", "\U000F0F33" },
+          { "snowy", "\U000F0598" },
+          { "snowy-rainy", "\U000F067F" },
+          { "sunny", "\U000F0599" }
+      };
+      
+      it.printf(0, 3, id(material), weather_state[id(weather_condition).state.c_str()].c_str());
+      it.printf(50, 3, id(font_med), id(weather_text).state.c_str());
+      it.printf(50, 28, id(futur), id(COLOR_CSS_LIGHTGRAY), "%.1f°C, %.1f m/s", id(weather_temp).state, id(weather_wind).state);
+      
+      it.strftime(235, 10, id(font_big), "%H:%M", id(homeassistant_time).now());
+      
+      it.line(0, 55, 320, 55, id(COLOR_CSS_LIGHTGRAY));
+      
+      // EPG
+      it.line(0, 145, 320, 145, id(COLOR_CSS_LIGHTGRAY));
+      
+      it.image(0, 160, id(nrk1_logo));
+      it.print(35, 160, id(futur), id(COLOR_CSS_YELLOW), id(nrk1_current).state.c_str());
+      it.print(35, 180, id(futur), id(COLOR_CSS_LIGHTGRAY), id(nrk1_next).state.c_str());
+
+      it.image(0, 200, id(nrkp2_logo));
+      it.print(35, 200, id(futur), id(COLOR_CSS_YELLOW), id(nrkp2_current).state.c_str());
+      it.print(35, 220, id(futur), id(COLOR_CSS_LIGHTGRAY), id(nrkp2_next).state.c_str());

@@ -1,0 +1,5 @@
+# Gitignore settings for ESPHome
+/.esphome/
+/fonts/
+/colors/
+/secrets.yaml
